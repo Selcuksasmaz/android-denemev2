@@ -1,0 +1,24 @@
+<resources>
+    <string name="app_name">Yüz Tanıma</string>
+    <string name="camera_permission_required">Kamera izni gerekli</string>
+    <string name="face_registration">Yüz Kaydı</string>
+    <string name="face_recognition">Yüz Tanıma</string>
+    <string name="register_new_face">Yeni Yüz Kaydet</string>
+    <string name="start_recognition">Tanımayı Başlat</string>
+    <string name="person_name">Kişi Adı</string>
+    <string name="register">Kaydet</string>
+    <string name="cancel">İptal</string>
+    <string name="continue_text">Devam</string>
+    <string name="complete">Tamamla</string>
+    <string name="face_detected">Yüz tespit edildi</string>
+    <string name="no_face_detected">Yüz tespit edilemedi</string>
+    <string name="look_straight">Düz bakın</string>
+    <string name="look_left">Sola dönün</string>
+    <string name="look_right">Sağa dönün</string>
+    <string name="look_up">Yukarı bakın</string>
+    <string name="look_down">Aşağı bakın</string>
+    <string name="angle_captured">%s açısı kaydedildi</string>
+    <string name="registration_complete">Kayıt tamamlandı</string>
+    <string name="person_recognized">%s tanındı (%%%.1f)</string>
+    <string name="person_not_recognized">Kişi tanınmadı</string>
+</resources>
