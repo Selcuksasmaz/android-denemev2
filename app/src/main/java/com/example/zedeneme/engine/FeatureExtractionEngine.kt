@@ -2,12 +2,16 @@ package com.example.zedeneme.engine
 
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.util.Log
 import com.example.zedeneme.data.FaceLandmarks
 import kotlin.math.*
 
-class FeatureExtractionEngine {
+class FeatureExtractionEngine(
+    private val tensorFlowEngine: TensorFlowFaceRecognition
+) {
 
     companion object {
+        private const val TAG = "FeatureExtraction"
         private const val FEATURE_SIZE_LBP = 256
         private const val FEATURE_SIZE_HOG = 144
         private const val FEATURE_SIZE_GEOMETRIC = 20
@@ -15,8 +19,31 @@ class FeatureExtractionEngine {
         private const val RESIZE_HEIGHT = 64
     }
 
-    // Ana feature extraction fonksiyonu
+    // Ana feature extraction fonksiyonu - TensorFlow Lite ile güncellenmiş
     fun extractCombinedFeatures(bitmap: Bitmap, landmarks: FaceLandmarks): FloatArray {
+        return try {
+            Log.d(TAG, "🚀 TensorFlow Lite ile feature extraction başlıyor...")
+
+            // Önce TensorFlow Lite kullanmayı dene
+            val tensorFlowFeatures = tensorFlowEngine.extractFeatures(bitmap)
+
+            if (tensorFlowFeatures != null && tensorFlowEngine.isFeatureQualityGood(tensorFlowFeatures)) {
+                Log.d(TAG, "✅ TensorFlow features başarıyla çıkarıldı: ${tensorFlowFeatures.size} boyut")
+                tensorFlowFeatures
+            } else {
+                Log.w(TAG, "⚠️ TensorFlow features kalitesiz veya null, legacy metodlar kullanılıyor")
+                extractLegacyFeatures(bitmap, landmarks)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ TensorFlow feature extraction hatası, fallback kullanılıyor", e)
+            extractLegacyFeatures(bitmap, landmarks)
+        }
+    }
+
+    // Legacy feature extraction (fallback olarak)
+    private fun extractLegacyFeatures(bitmap: Bitmap, landmarks: FaceLandmarks): FloatArray {
+        Log.d(TAG, "🔄 Legacy feature extraction kullanılıyor")
+
         val lbpFeatures = extractLBPFeatures(bitmap)
         val hogFeatures = extractHOGFeatures(bitmap)
         val geometricFeatures = extractGeometricFeatures(landmarks)
@@ -26,8 +53,8 @@ class FeatureExtractionEngine {
         return normalizeFeatures(combined)
     }
 
-    // LBP (Local Binary Pattern) özellik çıkarma
-    fun extractLBPFeatures(bitmap: Bitmap): FloatArray {
+    // LBP (Local Binary Pattern) özellik çıkarma - legacy
+    private fun extractLBPFeatures(bitmap: Bitmap): FloatArray {
         val grayBitmap = convertToGrayscale(bitmap)
         val resizedBitmap = Bitmap.createScaledBitmap(grayBitmap, RESIZE_WIDTH, RESIZE_HEIGHT, true)
 
@@ -37,8 +64,8 @@ class FeatureExtractionEngine {
         return histogram
     }
 
-    // HOG (Histogram of Oriented Gradients) özellik çıkarma
-    fun extractHOGFeatures(bitmap: Bitmap): FloatArray {
+    // HOG (Histogram of Oriented Gradients) özellik çıkarma - legacy
+    private fun extractHOGFeatures(bitmap: Bitmap): FloatArray {
         val grayBitmap = convertToGrayscale(bitmap)
         val resizedBitmap = Bitmap.createScaledBitmap(grayBitmap, RESIZE_WIDTH, RESIZE_HEIGHT, true)
 
@@ -49,7 +76,7 @@ class FeatureExtractionEngine {
     }
 
     // Landmark tabanlı geometrik özellikler - güncellenmiş landmark indexleri
-    fun extractGeometricFeatures(landmarks: FaceLandmarks): FloatArray {
+    private fun extractGeometricFeatures(landmarks: FaceLandmarks): FloatArray {
         if (landmarks.points.size < 3) return FloatArray(FEATURE_SIZE_GEOMETRIC) { 0f }
 
         val features = mutableListOf<Float>()
@@ -89,7 +116,7 @@ class FeatureExtractionEngine {
             }
 
         } catch (e: Exception) {
-            // Hata durumunda varsayılan değerler
+            Log.w(TAG, "Geometric features extraction hatası", e)
         }
 
         // 20 özelliğe tamamla veya kısalt
@@ -98,6 +125,48 @@ class FeatureExtractionEngine {
         }
 
         return features.take(FEATURE_SIZE_GEOMETRIC).toFloatArray()
+    }
+
+    // TensorFlow Lite özellik kalitesi kontrolü
+    fun assessFeatureQuality(features: FloatArray): Float {
+        return if (tensorFlowEngine.isFeatureQualityGood(features)) {
+            1.0f // Yüksek kalite
+        } else {
+            0.5f // Düşük kalite
+        }
+    }
+
+    // Batch processing için
+    fun extractFeaturesForBatch(bitmaps: List<Bitmap>, landmarksList: List<FaceLandmarks>): List<FloatArray> {
+        require(bitmaps.size == landmarksList.size) { "Bitmap ve landmarks listesi aynı boyutta olmalı" }
+
+        return bitmaps.zip(landmarksList) { bitmap, landmarks ->
+            extractCombinedFeatures(bitmap, landmarks)
+        }
+    }
+
+    // Feature türünü döndür (debugging için)
+    fun getFeatureType(features: FloatArray): String {
+        return when (features.size) {
+            512 -> "TensorFlow Lite (512D)"
+            420 -> "Legacy Combined (LBP+HOG+Geometric)"
+            256 -> "LBP Only"
+            144 -> "HOG Only"
+            20 -> "Geometric Only"
+            else -> "Unknown (${features.size}D)"
+        }
+    }
+
+    // Feature istatistikleri
+    fun getFeatureStats(features: FloatArray): Map<String, Float> {
+        return mapOf(
+            "dimensions" to features.size.toFloat(),
+            "mean" to features.average().toFloat(),
+            "std" to sqrt(features.map { (it - features.average()) * (it - features.average()) }.average()).toFloat(),
+            "min" to features.minOrNull() ?: 0f,
+            "max" to features.maxOrNull() ?: 0f,
+            "quality" to assessFeatureQuality(features)
+        )
     }
 
     private fun calculateSymmetryFeatures(landmarks: FaceLandmarks): List<Float> {
@@ -128,7 +197,7 @@ class FeatureExtractionEngine {
             }
 
         } catch (e: Exception) {
-            // Hata durumunda varsayılan değerler
+            Log.w(TAG, "Simetri özellikleri hesaplama hatası", e)
         }
 
         // 5 simetri özelliğine tamamla
@@ -153,7 +222,7 @@ class FeatureExtractionEngine {
                 features.add(normalizedDistance)
             }
         } catch (e: Exception) {
-            // Hata durumunda varsayılan değerler
+            Log.w(TAG, "Merkez özellikleri hesaplama hatası", e)
         }
 
         // 5 merkez özelliğine tamamla

@@ -1,351 +1,345 @@
 package com.example.zedeneme.viewmodel
 
-import android.graphics.Bitmap
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.example.zedeneme.data.RegistrationState
-import com.example.zedeneme.data.DetectedFace
-import com.example.zedeneme.engine.FaceDetectionEngine
-import com.example.zedeneme.engine.FeatureExtractionEngine
-import com.example.zedeneme.repository.FaceRepository
-import com.google.gson.Gson
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.delay
+import android.graphics.Bitmap
+import android.util.Log
+import com.example.zedeneme.repository.FaceRepository
+import com.example.zedeneme.engine.FaceDetectionEngine
+import com.example.zedeneme.engine.FeatureExtractionEngine
+import com.example.zedeneme.engine.TensorFlowFaceRecognition
+import com.example.zedeneme.data.DetectedFace
+import com.example.zedeneme.data.FaceProfile
+import com.example.zedeneme.data.StoredFaceFeatures
+
+data class RegistrationState(
+    val isLoading: Boolean = false,
+    val capturedFaces: List<DetectedFace> = emptyList(),
+    val currentPersonName: String = "",
+    val registrationProgress: Float = 0f,
+    val errorMessage: String? = null,
+    val successMessage: String? = null,
+    val featureExtractionProgress: String = "",
+    val requiredAngles: List<String> = listOf("frontal", "left", "right", "up", "down"),
+    val completedAngles: Set<String> = emptySet(),
+    val isRegistrationComplete: Boolean = false,
+    val tensorFlowEnabled: Boolean = true,
+    val currentFeatureType: String = "Unknown"
+)
 
 class FaceRegistrationViewModel(
     private val repository: FaceRepository,
     private val faceDetectionEngine: FaceDetectionEngine,
-    private val featureExtractionEngine: FeatureExtractionEngine
+    private val featureExtractionEngine: FeatureExtractionEngine,
+    private val tensorFlowEngine: TensorFlowFaceRecognition
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(RegistrationState())
-    val uiState: StateFlow<RegistrationState> = _uiState.asStateFlow()
-
-    private val gson = Gson()
-    private var isProcessingFrame = false
-    private var lastProcessTime = 0L
-    private val MIN_PROCESS_INTERVAL = 500L // 500ms aralıkla işle
+    private val _state = MutableStateFlow(RegistrationState())
+    val state: StateFlow<RegistrationState> = _state.asStateFlow()
 
     companion object {
-        private const val TAG = "FaceRegistration"
+        private const val TAG = "FaceRegistrationVM"
+        private const val MIN_FACES_PER_PERSON = 5
+        private const val MAX_FACES_PER_PERSON = 15
     }
 
-    fun startRegistration(personName: String) {
-        Log.d(TAG, "Registration başlatılıyor: $personName")
-
-        if (personName.isBlank()) {
-            _uiState.value = _uiState.value.copy(
-                error = "Lütfen bir isim girin"
-            )
-            return
-        }
-
-        viewModelScope.launch {
-            try {
-                val profileId = repository.createNewProfile(personName.trim())
-                val nextAngle = repository.getNextRequiredAngle(emptySet())
-                val instruction = repository.getAngleInstructions()[nextAngle] ?: "Kameraya bakın"
-
-                Log.d(TAG, "Profile oluşturuldu: $profileId, İlk açı: $nextAngle")
-
-                _uiState.value = RegistrationState(
-                    isRegistering = true,
-                    currentAngle = nextAngle ?: "frontal",
-                    currentInstruction = instruction,
-                    profileId = profileId,
-                    personName = personName.trim(),
-                    progress = 0f,
-                    completedAngles = emptySet()
-                )
-            } catch (e: Exception) {
-                Log.e(TAG, "Registration başlatma hatası", e)
-                _uiState.value = _uiState.value.copy(
-                    error = "Kayıt başlatılamadı: ${e.message}"
-                )
-            }
-        }
+    fun setPersonName(name: String) {
+        _state.value = _state.value.copy(currentPersonName = name.trim())
+        Log.d(TAG, "👤 Person name set: ${name.trim()}")
     }
 
-    fun processFrame(bitmap: Bitmap) {
-        val currentState = _uiState.value
-        if (!currentState.isRegistering || currentState.profileId == null || isProcessingFrame) {
-            return
-        }
-
-        // Frame rate sınırlaması
-        val currentTime = System.currentTimeMillis()
-        if (currentTime - lastProcessTime < MIN_PROCESS_INTERVAL) {
-            return
-        }
-
-        isProcessingFrame = true
-        lastProcessTime = currentTime
-
+    fun processCameraFrame(bitmap: Bitmap) {
         viewModelScope.launch {
             try {
-                Log.d(TAG, "Frame işleniyor...")
+                _state.value = _state.value.copy(
+                    isLoading = true,
+                    errorMessage = null,
+                    featureExtractionProgress = "🔍 Yüz algılama..."
+                )
 
                 // Face detection
                 val detectedFaces = faceDetectionEngine.detectFaces(bitmap)
-                Log.d(TAG, "Tespit edilen yüz sayısı: ${detectedFaces.size}")
+                Log.d(TAG, "🎯 Detected ${detectedFaces.size} faces")
 
                 if (detectedFaces.isEmpty()) {
-                    _uiState.value = currentState.copy(
-                        detectedFace = null,
-                        currentInstruction = "Yüz bulunamadı - Kameraya daha yakın olun"
+                    _state.value = _state.value.copy(
+                        isLoading = false,
+                        errorMessage = "❌ Yüz algılanamadı. Kamerayı yüzünüze doğru çevirin.",
+                        featureExtractionProgress = ""
                     )
-                    isProcessingFrame = false
                     return@launch
                 }
 
-                val bestFace = detectedFaces.maxByOrNull { it.confidence }
-                Log.d(TAG, "En iyi yüz confidence: ${bestFace?.confidence}")
+                if (detectedFaces.size > 1) {
+                    _state.value = _state.value.copy(
+                        isLoading = false,
+                        errorMessage = "⚠️ Birden fazla yüz algılandı. Tek kişi olduğunuzdan emin olun.",
+                        featureExtractionProgress = ""
+                    )
+                    return@launch
+                }
 
-                if (bestFace != null) {
-                    val detectedAngle = bestFace.angle.getAngleType()
-                    val targetAngle = currentState.currentAngle
+                val detectedFace = detectedFaces.first()
 
-                    Log.d(TAG, "Tespit edilen açı: $detectedAngle, Hedef açı: $targetAngle")
-                    Log.d(TAG, "Yüz açıları - Yaw: ${bestFace.angle.yaw}, Pitch: ${bestFace.angle.pitch}")
+                // Feature extraction with TensorFlow Lite
+                _state.value = _state.value.copy(
+                    featureExtractionProgress = "🧠 TensorFlow Lite ile özellikler çıkarılıyor..."
+                )
 
-                    // Yüz kalitesi kontrolü
-                    val isQualityGood = faceDetectionEngine.isQualityGoodEnough(bestFace)
-                    Log.d(TAG, "Yüz kalitesi: $isQualityGood")
+                val features = featureExtractionEngine.extractCombinedFeatures(
+                    detectedFace.bitmap,
+                    detectedFace.landmarks
+                )
 
-                    if (isQualityGood) {
-                        _uiState.value = currentState.copy(
-                            detectedFace = bestFace,
-                            currentInstruction = getDetailedInstruction(detectedAngle, targetAngle, bestFace)
-                        )
+                val featureType = featureExtractionEngine.getFeatureType(features)
+                val featureQuality = featureExtractionEngine.assessFeatureQuality(features)
 
-                        // Otomatik kayıt - açı uyumlu ve kalite yeterli ise
-                        if (isAngleMatch(detectedAngle, targetAngle) && bestFace.confidence > 0.7f) {
-                            Log.d(TAG, "Otomatik kayıt başlatılıyor...")
-                            saveFaceFeatures(bestFace, currentState.profileId, targetAngle)
-                        }
-                    } else {
-                        _uiState.value = currentState.copy(
-                            detectedFace = bestFace,
-                            currentInstruction = "Yüz kalitesi düşük - Işık daha iyi olsun ve sabit durun"
-                        )
-                    }
-                } else {
-                    _uiState.value = currentState.copy(
-                        detectedFace = null,
-                        currentInstruction = "Net bir yüz tespit edilemedi"
+                Log.d(TAG, "✅ Features extracted: ${featureType}, Quality: $featureQuality")
+
+                // Quality check
+                if (featureQuality < 0.5f) {
+                    _state.value = _state.value.copy(
+                        isLoading = false,
+                        errorMessage = "⚠️ Yüz kalitesi düşük. Daha iyi ışıklandırma ve net görüntü deneyin.",
+                        featureExtractionProgress = ""
+                    )
+                    return@launch
+                }
+
+                // Determine face angle
+                val faceAngle = determineFaceAngle(detectedFace)
+                Log.d(TAG, "📐 Face angle determined: $faceAngle")
+
+                // Add to captured faces
+                val currentFaces = _state.value.capturedFaces.toMutableList()
+
+                // Check if we already have this angle
+                val angleCount = currentFaces.count { it.angle == faceAngle }
+                if (angleCount >= 3) {
+                    _state.value = _state.value.copy(
+                        isLoading = false,
+                        errorMessage = "✅ Bu açıdan yeterli görüntü var ($faceAngle). Farklı açı deneyin.",
+                        featureExtractionProgress = ""
+                    )
+                    return@launch
+                }
+
+                // Add the face with extracted features
+                val faceWithFeatures = detectedFace.copy(
+                    angle = faceAngle,
+                    extractedFeatures = features,
+                    confidence = featureQuality
+                )
+                currentFaces.add(faceWithFeatures)
+
+                // Update completed angles
+                val completedAngles = currentFaces.map { it.angle }.toSet()
+                val progress = currentFaces.size.toFloat() / MIN_FACES_PER_PERSON
+                val isComplete = currentFaces.size >= MIN_FACES_PER_PERSON &&
+                        completedAngles.size >= 3
+
+                _state.value = _state.value.copy(
+                    isLoading = false,
+                    capturedFaces = currentFaces,
+                    completedAngles = completedAngles,
+                    registrationProgress = progress.coerceAtMost(1f),
+                    isRegistrationComplete = isComplete,
+                    successMessage = "✅ Yüz kaydedildi (${currentFaces.size}/${MIN_FACES_PER_PERSON}) - $faceAngle",
+                    errorMessage = null,
+                    featureExtractionProgress = "",
+                    currentFeatureType = featureType
+                )
+
+                if (isComplete) {
+                    _state.value = _state.value.copy(
+                        successMessage = "🎉 Kayıt için yeterli yüz toplanıldı! Kaydet butonuna basın."
                     )
                 }
 
             } catch (e: Exception) {
-                Log.e(TAG, "Frame işleme hatası", e)
-                _uiState.value = currentState.copy(
-                    error = "Yüz işleme hatası: ${e.message}"
+                Log.e(TAG, "❌ Camera frame processing error", e)
+                _state.value = _state.value.copy(
+                    isLoading = false,
+                    errorMessage = "❌ İşlem hatası: ${e.message}",
+                    featureExtractionProgress = ""
                 )
-            } finally {
-                isProcessingFrame = false
             }
         }
     }
 
-    private fun getDetailedInstruction(detectedAngle: String, targetAngle: String, face: DetectedFace): String {
-        return when {
-            detectedAngle == targetAngle && face.confidence > 0.7f -> {
-                "✅ Mükemmel! Otomatik kaydediliyor..."
-            }
-            detectedAngle == targetAngle && face.confidence > 0.5f -> {
-                "✅ İyi! Biraz daha sabit durun..."
-            }
-            detectedAngle == targetAngle -> {
-                "⚠️ Açı doğru ama kalite düşük. Işığı iyileştirin."
-            }
-            targetAngle == "frontal" -> {
-                when {
-                    face.angle.yaw > 10 -> "👈 Başınızı sola çevirin"
-                    face.angle.yaw < -10 -> "👉 Başınızı sağa çevirin"
-                    face.angle.pitch > 10 -> "👇 Başınızı aşağı eğin"
-                    face.angle.pitch < -10 -> "👆 Başınızı yukarı kaldırın"
-                    else -> "📷 Düz bakın"
+    fun saveFaceProfile() {
+        viewModelScope.launch {
+            try {
+                val currentState = _state.value
+
+                if (currentState.currentPersonName.isBlank()) {
+                    _state.value = currentState.copy(
+                        errorMessage = "⚠️ Lütfen kişi adını girin."
+                    )
+                    return@launch
                 }
-            }
-            targetAngle == "left_profile" -> {
-                when {
-                    face.angle.yaw < 20 -> "👈 Başınızı daha fazla sola çevirin"
-                    face.angle.yaw > 60 -> "👉 Başınızı biraz sağa getirin"
-                    else -> "✅ Sol profil pozisyonu iyi"
+
+                if (currentState.capturedFaces.size < MIN_FACES_PER_PERSON) {
+                    _state.value = currentState.copy(
+                        errorMessage = "⚠️ En az $MIN_FACES_PER_PERSON yüz görüntüsü gerekli."
+                    )
+                    return@launch
                 }
-            }
-            targetAngle == "right_profile" -> {
-                when {
-                    face.angle.yaw > -20 -> "👉 Başınızı daha fazla sağa çevirin"
-                    face.angle.yaw < -60 -> "👈 Başınızı biraz sola getirin"
-                    else -> "✅ Sağ profil pozisyonu iyi"
+
+                _state.value = currentState.copy(
+                    isLoading = true,
+                    featureExtractionProgress = "💾 Profil kaydediliyor..."
+                )
+
+                // Create face profile
+                val faceProfile = FaceProfile(
+                    personName = currentState.currentPersonName,
+                    faceCount = currentState.capturedFaces.size,
+                    createdAt = System.currentTimeMillis(),
+                    updatedAt = System.currentTimeMillis(),
+                    featureType = currentState.currentFeatureType,
+                    averageConfidence = currentState.capturedFaces.map { it.confidence }.average().toFloat()
+                )
+
+                val profileId = repository.insertProfile(faceProfile)
+                Log.d(TAG, "✅ Profile created with ID: $profileId")
+
+                // Save individual face features
+                var savedCount = 0
+                for (face in currentState.capturedFaces) {
+                    val storedFeatures = StoredFaceFeatures(
+                        profileId = profileId,
+                        features = face.extractedFeatures ?: floatArrayOf(),
+                        angle = face.angle,
+                        confidence = face.confidence,
+                        createdAt = System.currentTimeMillis(),
+                        featureType = currentState.currentFeatureType
+                    )
+
+                    repository.insertFeatures(storedFeatures)
+                    savedCount++
+
+                    _state.value = currentState.copy(
+                        featureExtractionProgress = "💾 Yüz kaydediliyor... ($savedCount/${currentState.capturedFaces.size})"
+                    )
                 }
+
+                Log.d(TAG, "✅ All faces saved successfully: $savedCount faces")
+
+                _state.value = RegistrationState(
+                    successMessage = "🎉 ${currentState.currentPersonName} başarıyla kaydedildi! ($savedCount yüz)",
+                    currentFeatureType = currentState.currentFeatureType
+                )
+
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Face profile save error", e)
+                _state.value = _state.value.copy(
+                    isLoading = false,
+                    errorMessage = "❌ Kayıt hatası: ${e.message}",
+                    featureExtractionProgress = ""
+                )
             }
-            targetAngle == "up_angle" -> {
-                when {
-                    face.angle.pitch < 15 -> "👆 Başınızı daha fazla yukarı kaldırın"
-                    face.angle.pitch > 45 -> "👇 Başınızı biraz aşağı getirin"
-                    else -> "✅ Yukarı açı pozisyonu iyi"
-                }
-            }
-            targetAngle == "down_angle" -> {
-                when {
-                    face.angle.pitch > -15 -> "👇 Başınızı daha fazla aşağı eğin"
-                    face.angle.pitch < -45 -> "👆 Başınızı biraz yukarı getirin"
-                    else -> "✅ Aşağı açı pozisyonu iyi"
-                }
-            }
-            else -> "Pozisyonu ayarlayın"
         }
     }
 
-    private fun isAngleMatch(detectedAngle: String, targetAngle: String): Boolean {
-        return detectedAngle == targetAngle
+    fun clearCapturedFaces() {
+        _state.value = _state.value.copy(
+            capturedFaces = emptyList(),
+            completedAngles = emptySet(),
+            registrationProgress = 0f,
+            isRegistrationComplete = false,
+            successMessage = null,
+            errorMessage = null
+        )
+        Log.d(TAG, "🗑️ Captured faces cleared")
     }
 
-    private suspend fun saveFaceFeatures(detectedFace: DetectedFace, profileId: String, angle: String) {
-        try {
-            Log.d(TAG, "Feature extraction başlıyor...")
+    fun clearMessages() {
+        _state.value = _state.value.copy(
+            errorMessage = null,
+            successMessage = null
+        )
+    }
 
-            val features = featureExtractionEngine.extractCombinedFeatures(
-                detectedFace.bitmap,
-                detectedFace.landmarks
+    fun getTensorFlowStats(): Map<String, Any> {
+        return try {
+            mapOf(
+                "tensorflow_enabled" to _state.value.tensorFlowEnabled,
+                "current_feature_type" to _state.value.currentFeatureType,
+                "captured_faces" to _state.value.capturedFaces.size,
+                "completed_angles" to _state.value.completedAngles.size,
+                "registration_progress" to _state.value.registrationProgress,
+                "min_faces_required" to MIN_FACES_PER_PERSON,
+                "max_faces_allowed" to MAX_FACES_PER_PERSON
             )
-
-            Log.d(TAG, "Çıkarılan feature sayısı: ${features.size}")
-
-            // Feature quality check
-            if (features.any { it.isNaN() || it.isInfinite() }) {
-                Log.w(TAG, "Feature kalitesi düşük - NaN veya Infinite değerler var")
-                _uiState.value = _uiState.value.copy(
-                    error = "Feature kalitesi düşük, tekrar deneyin"
-                )
-                return
-            }
-
-            val landmarksJson = gson.toJson(detectedFace.landmarks)
-
-            // Repository'ye kaydet
-            repository.saveFeatures(profileId, angle, features, landmarksJson)
-
-            Log.d(TAG, "Features kaydedildi: $angle")
-
-            val currentState = _uiState.value
-            val newCompletedAngles = currentState.completedAngles + angle
-            val nextAngle = repository.getNextRequiredAngle(newCompletedAngles)
-            val progress = repository.getCompletionProgress(newCompletedAngles)
-
-            Log.d(TAG, "İlerleme: ${newCompletedAngles.size}/5, Sonraki açı: $nextAngle")
-
-            if (nextAngle != null) {
-                // Bir sonraki açıya geç
-                val instruction = repository.getAngleInstructions()[nextAngle] ?: ""
-                _uiState.value = currentState.copy(
-                    currentAngle = nextAngle,
-                    completedAngles = newCompletedAngles,
-                    currentInstruction = "✅ $angle kaydedildi! $instruction",
-                    progress = progress,
-                    detectedFace = null
-                )
-
-                // 2 saniye sonra normal instruction'a dön
-                delay(2000)
-                _uiState.value = _uiState.value.copy(
-                    currentInstruction = instruction
-                )
-            } else {
-                // Kayıt tamamlandı
-                Log.d(TAG, "Tüm açılar tamamlandı!")
-                _uiState.value = currentState.copy(
-                    isComplete = true,
-                    progress = 1f,
-                    currentInstruction = "🎉 Kayıt başarıyla tamamlandı!"
-                )
-            }
-
         } catch (e: Exception) {
-            Log.e(TAG, "Feature kaydetme hatası", e)
-            _uiState.value = _uiState.value.copy(
-                error = "Özellik kaydetme hatası: ${e.message}"
-            )
+            mapOf("error" to e.message.orEmpty())
         }
     }
 
-    fun forceCapture() {
-        Log.d(TAG, "Manuel kayıt tetiklendi")
-        val currentState = _uiState.value
-        currentState.detectedFace?.let { face ->
-            currentState.profileId?.let { profileId ->
-                viewModelScope.launch {
-                    saveFaceFeatures(face, profileId, currentState.currentAngle)
-                }
+    private fun determineFaceAngle(detectedFace: DetectedFace): String {
+        return try {
+            val landmarks = detectedFace.landmarks
+            if (landmarks.points.size < 2) return "frontal"
+
+            val boundingBox = landmarks.boundingBox
+            val centerX = boundingBox.centerX()
+            val centerY = boundingBox.centerY()
+
+            // Sol ve sağ göz pozisyonları (index 0 ve 1)
+            val leftEye = landmarks.points[0]
+            val rightEye = landmarks.points[1]
+
+            // Yatay açı hesaplama
+            val eyeCenterX = (leftEye.first + rightEye.first) / 2
+            val horizontalOffset = (eyeCenterX - centerX) / boundingBox.width()
+
+            // Dikey açı hesaplama
+            val eyeCenterY = (leftEye.second + rightEye.second) / 2
+            val verticalOffset = (eyeCenterY - centerY) / boundingBox.height()
+
+            when {
+                horizontalOffset > 0.15f -> "right"
+                horizontalOffset < -0.15f -> "left"
+                verticalOffset < -0.1f -> "up"
+                verticalOffset > 0.1f -> "down"
+                else -> "frontal"
             }
+        } catch (e: Exception) {
+            Log.w(TAG, "Face angle determination error", e)
+            "frontal"
         }
     }
 
-    fun skipCurrentAngle() {
-        Log.d(TAG, "Açı atlandı")
-        val currentState = _uiState.value
-        val newCompletedAngles = currentState.completedAngles + currentState.currentAngle
-        val nextAngle = repository.getNextRequiredAngle(newCompletedAngles)
-        val progress = repository.getCompletionProgress(newCompletedAngles)
-
-        if (nextAngle != null) {
-            val instruction = repository.getAngleInstructions()[nextAngle] ?: ""
-            _uiState.value = currentState.copy(
-                currentAngle = nextAngle,
-                completedAngles = newCompletedAngles,
-                currentInstruction = instruction,
-                progress = progress
-            )
-        } else {
-            _uiState.value = currentState.copy(
-                isComplete = true,
-                progress = 1f,
-                currentInstruction = "Kayıt tamamlandı! (Bazı açılar atlandı)"
-            )
-        }
-    }
-
-    fun resetRegistration() {
-        Log.d(TAG, "Registration sıfırlandı")
-        _uiState.value = RegistrationState()
-        isProcessingFrame = false
-    }
-
-    fun clearError() {
-        _uiState.value = _uiState.value.copy(error = null)
-    }
-
-    // Debug bilgileri
-    fun getDebugInfo(): String {
-        val state = _uiState.value
-        return """
-            Kayıt durumu: ${state.isRegistering}
-            Mevcut açı: ${state.currentAngle}
-            Tamamlanan açılar: ${state.completedAngles}
-            İlerleme: ${(state.progress * 100).toInt()}%
-            Tespit edilen yüz: ${state.detectedFace != null}
-            Hata: ${state.error ?: "Yok"}
-        """.trimIndent()
+    override fun onCleared() {
+        super.onCleared()
+        Log.d(TAG, "🔒 ViewModel cleared")
     }
 }
 
+// Factory class for ViewModel creation
 class FaceRegistrationViewModelFactory(
     private val repository: FaceRepository,
     private val faceDetectionEngine: FaceDetectionEngine,
-    private val featureExtractionEngine: FeatureExtractionEngine
+    private val featureExtractionEngine: FeatureExtractionEngine,
+    private val tensorFlowEngine: TensorFlowFaceRecognition
 ) : ViewModelProvider.Factory {
+
+    @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(FaceRegistrationViewModel::class.java)) {
-            @Suppress("UNCHECKED_CAST")
-            return FaceRegistrationViewModel(repository, faceDetectionEngine, featureExtractionEngine) as T
+            return FaceRegistrationViewModel(
+                repository = repository,
+                faceDetectionEngine = faceDetectionEngine,
+                featureExtractionEngine = featureExtractionEngine,
+                tensorFlowEngine = tensorFlowEngine
+            ) as T
         }
-        throw IllegalArgumentException("Unknown ViewModel class")
+        throw IllegalArgumentException("Unknown ViewModel class: ${modelClass.name}")
     }
 }

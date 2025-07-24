@@ -59,6 +59,9 @@ android {
 }
 
 dependencies {
+    implementation("org.tensorflow:tensorflow-lite:2.13.0")
+    implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
+    implementation("org.tensorflow:tensorflow-lite-gpu:2.13.0")
     // Compose BOM
     implementation(platform(libs.androidx.compose.bom))
 
@@ -66,13 +69,17 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
-
+    implementation("com.google.mlkit:face-detection:16.1.5")
     // Compose UI
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
-
+    implementation("org.tensorflow:tensorflow-lite:2.13.0")
+    implementation("org.tensorflow:tensorflow-lite-gpu:2.13.0")
+    implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
+// Image processing
+    implementation("org.tensorflow:tensorflow-lite-task-vision:0.4.4")
     // Compose Extensions
     implementation("androidx.compose.material:material-icons-extended:1.5.8")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
