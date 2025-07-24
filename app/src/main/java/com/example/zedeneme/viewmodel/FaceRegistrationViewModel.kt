@@ -9,6 +9,7 @@ import com.example.zedeneme.data.RegistrationState
 import com.example.zedeneme.data.DetectedFace
 import com.example.zedeneme.engine.FaceDetectionEngine
 import com.example.zedeneme.engine.FeatureExtractionEngine
+import com.example.zedeneme.engine.EnhancedFaceRecognitionEngine
 import com.example.zedeneme.repository.FaceRepository
 import com.google.gson.Gson
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,7 +21,8 @@ import kotlinx.coroutines.delay
 class FaceRegistrationViewModel(
     private val repository: FaceRepository,
     private val faceDetectionEngine: FaceDetectionEngine,
-    private val featureExtractionEngine: FeatureExtractionEngine
+    private val featureExtractionEngine: FeatureExtractionEngine,
+    private val enhancedFaceRecognitionEngine: EnhancedFaceRecognitionEngine? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(RegistrationState())
@@ -212,16 +214,35 @@ class FaceRegistrationViewModel(
         try {
             Log.d(TAG, "Feature extraction başlıyor...")
 
-            val features = featureExtractionEngine.extractCombinedFeatures(
-                detectedFace.bitmap,
-                detectedFace.landmarks
-            )
+            // Use enhanced engine if available
+            val features = if (enhancedFaceRecognitionEngine != null) {
+                enhancedFaceRecognitionEngine.extractFeatures(
+                    detectedFace.bitmap,
+                    detectedFace.landmarks
+                )
+            } else {
+                featureExtractionEngine.extractCombinedFeatures(
+                    detectedFace.bitmap,
+                    detectedFace.landmarks
+                )
+            }
 
             Log.d(TAG, "Çıkarılan feature sayısı: ${features.size}")
+            
+            // Log the engine being used
+            enhancedFaceRecognitionEngine?.let { engine ->
+                Log.d(TAG, "Engine status: ${engine.getEngineStatus()}")
+            }
 
-            // Feature quality check
-            if (features.any { it.isNaN() || it.isInfinite() }) {
-                Log.w(TAG, "Feature kalitesi düşük - NaN veya Infinite değerler var")
+            // Feature quality check using appropriate engine
+            val isQualityGood = if (enhancedFaceRecognitionEngine != null) {
+                enhancedFaceRecognitionEngine.isFeatureQualityGood(features, detectedFace.bitmap)
+            } else {
+                !features.any { it.isNaN() || it.isInfinite() }
+            }
+            
+            if (!isQualityGood) {
+                Log.w(TAG, "Feature kalitesi düşük")
                 _uiState.value = _uiState.value.copy(
                     error = "Feature kalitesi düşük, tekrar deneyin"
                 )
@@ -339,12 +360,18 @@ class FaceRegistrationViewModel(
 class FaceRegistrationViewModelFactory(
     private val repository: FaceRepository,
     private val faceDetectionEngine: FaceDetectionEngine,
-    private val featureExtractionEngine: FeatureExtractionEngine
+    private val featureExtractionEngine: FeatureExtractionEngine,
+    private val enhancedFaceRecognitionEngine: EnhancedFaceRecognitionEngine? = null
 ) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(FaceRegistrationViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return FaceRegistrationViewModel(repository, faceDetectionEngine, featureExtractionEngine) as T
+            return FaceRegistrationViewModel(
+                repository, 
+                faceDetectionEngine, 
+                featureExtractionEngine,
+                enhancedFaceRecognitionEngine
+            ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
