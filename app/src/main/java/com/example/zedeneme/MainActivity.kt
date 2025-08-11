@@ -13,9 +13,9 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.example.zedeneme.ui.screen.FaceRecognitionScreen
-import com.example.zedeneme.ui.screen.FaceRegistrationScreen
-import com.example.zedeneme.ui.screen.HomeScreen
+import ui.screen.FaceRecognitionScreen
+import ui.screen.FaceRegistrationScreen
+import ui.screen.HomeScreen
 import com.example.zedeneme.ui.theme.ZedenemeTheme
 
 class MainActivity : ComponentActivity() {

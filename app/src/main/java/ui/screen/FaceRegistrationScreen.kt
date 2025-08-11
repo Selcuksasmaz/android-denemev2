@@ -1,4 +1,4 @@
-package com.example.zedeneme.ui
+package ui.screen
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -163,7 +163,7 @@ fun FaceRegistrationScreen(
 
                     angles.forEach { angle ->
                         val isCompleted = state.completedAngles.contains(angle)
-                        val count = state.capturedFaces.count { it.angle == angle }
+                        val count = state.capturedFaces.count { it.angle.getAngleType() == angle }
 
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally
@@ -347,7 +347,7 @@ fun FaceRegistrationScreen(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = when (face.angle) {
+                                imageVector = when (face.angle.getAngleType()) {
                                     "frontal" -> Icons.Default.Face
                                     "left" -> Icons.Default.TurnLeft
                                     "right" -> Icons.Default.TurnRight
@@ -355,7 +355,7 @@ fun FaceRegistrationScreen(
                                     "down" -> Icons.Default.KeyboardArrowDown
                                     else -> Icons.Default.Face
                                 },
-                                contentDescription = face.angle,
+                                contentDescription = face.angle.getAngleType(),
                                 tint = MaterialTheme.colorScheme.primary
                             )
                             Spacer(modifier = Modifier.width(12.dp))

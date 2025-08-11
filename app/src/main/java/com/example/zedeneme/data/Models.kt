@@ -52,8 +52,10 @@ data class FaceAngle(
     }
 }
 
+data class Point(val x: Float, val y: Float)
+
 data class FaceLandmarks(
-    val points: List<Pair<Float, Float>>,
+    val points: List<Point>,
     val boundingBox: RectF,
     val confidence: Float
 )
@@ -71,7 +73,8 @@ data class DetectedFace(
     val landmarks: FaceLandmarks,
     val angle: FaceAngle,
     val confidence: Float,
-    val bitmap: android.graphics.Bitmap
+    val bitmap: android.graphics.Bitmap,
+    val extractedFeatures: FloatArray? = null
 )
 
 // UI State classes

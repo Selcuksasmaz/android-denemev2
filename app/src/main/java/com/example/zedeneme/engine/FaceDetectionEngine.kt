@@ -10,6 +10,7 @@ import com.google.mlkit.vision.face.FaceLandmark
 import com.example.zedeneme.data.FaceLandmarks
 import com.example.zedeneme.data.FaceAngle
 import com.example.zedeneme.data.DetectedFace
+import com.example.zedeneme.data.Point
 import kotlinx.coroutines.tasks.await
 
 class FaceDetectionEngine {
@@ -49,48 +50,40 @@ class FaceDetectionEngine {
     }
 
     private fun extractLandmarks(face: Face): FaceLandmarks {
-        val points = mutableListOf<Pair<Float, Float>>()
+        val points = mutableListOf<Point>()
 
         // Mevcut landmark'ları doğru isimlerle çıkar
         face.getLandmark(FaceLandmark.LEFT_EYE)?.let {
-            points.add(Pair(it.position.x, it.position.y))
+            points.add(Point(it.position.x, it.position.y))
         }
         face.getLandmark(FaceLandmark.RIGHT_EYE)?.let {
-            points.add(Pair(it.position.x, it.position.y))
+            points.add(Point(it.position.x, it.position.y))
         }
         face.getLandmark(FaceLandmark.NOSE_BASE)?.let {
-            points.add(Pair(it.position.x, it.position.y))
+            points.add(Point(it.position.x, it.position.y))
         }
 
         // Ağız landmark'ları - doğru isimler
         face.getLandmark(FaceLandmark.MOUTH_LEFT)?.let {
-            points.add(Pair(it.position.x, it.position.y))
+            points.add(Point(it.position.x, it.position.y))
         }
         face.getLandmark(FaceLandmark.MOUTH_RIGHT)?.let {
-            points.add(Pair(it.position.x, it.position.y))
+            points.add(Point(it.position.x, it.position.y))
         }
         face.getLandmark(FaceLandmark.MOUTH_BOTTOM)?.let {
-            points.add(Pair(it.position.x, it.position.y))
+            points.add(Point(it.position.x, it.position.y))
         }
 
         // Yanak landmark'ları
         face.getLandmark(FaceLandmark.LEFT_CHEEK)?.let {
-            points.add(Pair(it.position.x, it.position.y))
+            points.add(Point(it.position.x, it.position.y))
         }
         face.getLandmark(FaceLandmark.RIGHT_CHEEK)?.let {
-            points.add(Pair(it.position.x, it.position.y))
+            points.add(Point(it.position.x, it.position.y))
         }
 
-        // Kulak landmark'ları - MLKit'te mevcut değil, bu satırları kaldırıyoruz
-        // face.getLandmark(FaceLandmark.LEFT_EAR)?.let {
-        //     points.add(Pair(it.position.x, it.position.y))
-        // }
-        // face.getLandmark(FaceLandmark.RIGHT_EAR)?.let {
-        //     points.add(Pair(it.position.x, it.position.y))
-        // }
-
         return FaceLandmarks(
-            points = points,
+            points = points.toList(),
             boundingBox = RectF(face.boundingBox),
             confidence = 0.8f
         )

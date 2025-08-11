@@ -17,21 +17,8 @@ class FaceRepository(private val faceDao: FaceDao) {
 
     suspend fun getProfile(profileId: String): FaceProfile? = faceDao.getProfile(profileId)
 
-    suspend fun createNewProfile(personName: String): String {
-        val profileId = UUID.randomUUID().toString()
-        val profile = FaceProfile(
-            id = profileId,
-            personName = personName,
-            frontalFeatures = "",
-            leftProfileFeatures = "",
-            rightProfileFeatures = "",
-            upAngleFeatures = "",
-            downAngleFeatures = "",
-            registrationDate = System.currentTimeMillis(),
-            isComplete = false
-        )
+    suspend fun insertFullProfile(profile: FaceProfile) {
         faceDao.insertProfile(profile)
-        return profileId
     }
 
     suspend fun saveFeatures(profileId: String, angle: String, features: FloatArray, landmarks: String) {

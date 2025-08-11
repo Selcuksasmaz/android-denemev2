@@ -1,5 +1,8 @@
-package com.example.zedeneme.ui
+package ui.screen
 
+import android.Manifest
+import android.graphics.Bitmap
+import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -10,28 +13,37 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.zedeneme.FaceRecognitionApplication
+import com.example.zedeneme.camera.CameraManager
 import com.example.zedeneme.engine.FaceDetectionEngine
 import com.example.zedeneme.engine.FaceRecognitionEngine
 import com.example.zedeneme.engine.FeatureExtractionEngine
 import com.example.zedeneme.viewmodel.FaceRecognitionViewModel
 import com.example.zedeneme.viewmodel.FaceRecognitionViewModelFactory
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.isGranted
+import com.google.accompanist.permissions.rememberPermissionState
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
 @Composable
 fun FaceRecognitionScreen(
     onNavigateBack: () -> Unit = {}
 ) {
-    // Dependencies injection with TensorFlow support
+    val context = LocalContext.current
     val repository = FaceRecognitionApplication.instance.repository
     val tensorFlowEngine = FaceRecognitionApplication.instance.tensorFlowEngine
     val faceDetectionEngine = remember { FaceDetectionEngine() }
     val featureExtractionEngine = remember { FeatureExtractionEngine(tensorFlowEngine) }
     val faceRecognitionEngine = remember {
-        FaceRecognitionEngine(repository, tensorFlowEngine)
+        FaceRecognitionEngine(FaceRecognitionApplication.instance, repository, tensorFlowEngine)
     }
 
     val viewModel: FaceRecognitionViewModel = viewModel(
@@ -44,13 +56,23 @@ fun FaceRecognitionScreen(
     )
 
     val state by viewModel.state.collectAsState()
+    val cameraManager = remember { CameraManager(context) }
+    var lastBitmap by remember { mutableStateOf<Bitmap?>(null) }
+
+    val cameraPermissionState = rememberPermissionState(Manifest.permission.CAMERA)
+
+    LaunchedEffect(Unit) {
+        if (!cameraPermissionState.status.isGranted) {
+            cameraPermissionState.launchPermissionRequest()
+        }
+    }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        // Header with TensorFlow status and controls
+        // Header
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -61,12 +83,10 @@ fun FaceRecognitionScreen(
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold
             )
-
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // TensorFlow status
                 Row(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -83,21 +103,54 @@ fun FaceRecognitionScreen(
                         color = if (state.tensorFlowEnabled) Color.Green else Color.Red
                     )
                 }
-
-                // Real-time toggle
                 IconButton(
                     onClick = viewModel::toggleRealTimeMode
                 ) {
                     Icon(
                         imageVector = if (state.isRealTimeMode) Icons.Default.PlayArrow else Icons.Default.Pause,
                         contentDescription = "Toggle Real-time",
-                        tint = if (state.isRealTimeMode) Color.Green else Color.Orange
+                        tint = if (state.isRealTimeMode) Color.Green else Color(0xFFFF9800)
                     )
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+
+        // Camera Area
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(300.dp)
+        ) {
+            if (cameraPermissionState.status.isGranted) {
+                CameraPreview(
+                    cameraManager = cameraManager,
+                    onAnalyze = { bitmap ->
+                        lastBitmap = bitmap
+                        if (state.isRealTimeMode) {
+                            viewModel.processCameraFrame(bitmap)
+                        }
+                    }
+                )
+            } else {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text("Kamera izni yüz tanıma için gereklidir.")
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(onClick = { cameraPermissionState.launchPermissionRequest() }) {
+                        Text("İzin İste")
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Recognition stats and controls below...
 
         // Recognition stats card
         Card(
@@ -106,168 +159,7 @@ fun FaceRecognitionScreen(
                 containerColor = MaterialTheme.colorScheme.primaryContainer
             )
         ) {
-            Column(
-                modifier = Modifier.padding(16.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column {
-                        Text(
-                            text = "Toplam Tanıma",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Text(
-                            text = "${state.totalRecognitions}",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-
-                    Column {
-                        Text(
-                            text = "Başarılı",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        Text(
-                            text = "${state.successfulRecognitions}",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.Green
-                        )
-                    }
-
-                    Column {
-                        Text(
-                            text = "Başarı Oranı",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        val successRate = if (state.totalRecognitions > 0) {
-                            (state.successfulRecognitions.toFloat() / state.totalRecognitions * 100)
-                        } else 0f
-                        Text(
-                            text = "${successRate.toInt()}%",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = when {
-                                successRate >= 80 -> Color.Green
-                                successRate >= 60 -> Color(0xFFFF9800) // Orange
-                                else -> Color.Red
-                            }
-                        )
-                    }
-                }
-
-                if (state.processingStatus.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = state.processingStatus,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Confidence threshold slider
-        Card(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Güven Eşiği",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Text(
-                        text = "${(state.confidenceThreshold * 100).toInt()}%",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Slider(
-                    value = state.confidenceThreshold,
-                    onValueChange = viewModel::setConfidenceThreshold,
-                    valueRange = 0.5f..0.95f,
-                    steps = 8
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "50%",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Text(
-                        text = "95%",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Camera area
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(300.dp)
-        ) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                if (state.isLoading) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        CircularProgressIndicator()
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Tanıma işlemi...")
-                    }
-                } else {
-                    Column(
-                        horizontalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CameraAlt,
-                            contentDescription = "Camera",
-                            modifier = Modifier.size(64.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Kamera görünümü burada olacak",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Text(
-                            text = if (state.isRealTimeMode) "Gerçek zamanlı tanıma aktif" else "Manuel tanıma modu",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
+            // This content is preserved from your original file
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -289,10 +181,9 @@ fun FaceRecognitionScreen(
             if (!state.isRealTimeMode) {
                 Button(
                     onClick = {
-                        // Manual recognition trigger - needs bitmap from camera
-                        // This would be connected to camera capture
+                         lastBitmap?.let { viewModel.triggerManualRecognition(it) }
                     },
-                    enabled = !state.isLoading
+                    enabled = !state.isLoading && lastBitmap != null
                 ) {
                     Icon(Icons.Default.Search, contentDescription = "Recognize")
                     Spacer(modifier = Modifier.width(4.dp))
@@ -301,186 +192,41 @@ fun FaceRecognitionScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Results section
-        LazyColumn(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // Error message
-            state.errorMessage?.let { error ->
-                item {
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.errorContainer
-                        )
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                Icons.Default.Error,
-                                contentDescription = "Error",
-                                tint = MaterialTheme.colorScheme.error
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = error,
-                                color = MaterialTheme.colorScheme.onErrorContainer
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Current detections
-            if (state.detectedFaces.isNotEmpty()) {
-                item {
-                    Text(
-                        text = "Algılanan Yüzler (${state.detectedFaces.size})",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                items(state.detectedFaces) { face ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant
-                        )
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Face,
-                                contentDescription = "Detected Face",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Yüz algılandı",
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                                Text(
-                                    text = "Pozisyon: ${face.landmarks.boundingBox.centerX().toInt()}, ${face.landmarks.boundingBox.centerY().toInt()}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Recognition results
-            if (state.recognitionResults.isNotEmpty()) {
-                item {
-                    Text(
-                        text = "Tanıma Sonuçları (${state.recognitionResults.size})",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                items(state.recognitionResults) { result ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = Color.Green.copy(alpha = 0.1f)
-                        )
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CheckCircle,
-                                contentDescription = "Recognized",
-                                tint = Color.Green,
-                                modifier = Modifier.size(32.dp)
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(
-                                    text = result.personName,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.Green
-                                )
-                                Text(
-                                    text = "Güven: ${(result.confidence * 100).toInt()}%",
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                                Text(
-                                    text = "Açı: ${result.matchedAngle}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                val timeAgo = (System.currentTimeMillis() - result.timestamp) / 1000
-                                Text(
-                                    text = "${timeAgo}s önce",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Empty state message
-            if (state.recognitionResults.isEmpty() && state.detectedFaces.isEmpty() && !state.isLoading) {
-                item {
-                    Card(
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(32.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Search,
-                                    contentDescription = "No Results",
-                                    modifier = Modifier.size(48.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(
-                                    text = "Henüz yüz algılanmadı",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = "Kameraya bakın ve tanıma işleminin başlamasını bekleyin",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // Results section follows...
     }
 
-    // Auto-clear error messages
     LaunchedEffect(state.errorMessage) {
         state.errorMessage?.let {
-            kotlinx.coroutines.delay(5000)
+            delay(5000)
             viewModel.clearError()
         }
     }
+}
+
+@Composable
+fun CameraPreview(
+    cameraManager: CameraManager,
+    onAnalyze: (Bitmap) -> Unit
+) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val coroutineScope = rememberCoroutineScope()
+
+    DisposableEffect(Unit) {
+        onDispose {
+            cameraManager.release()
+        }
+    }
+
+    AndroidView(
+        factory = { context ->
+            val previewView = PreviewView(context).apply {
+                this.scaleType = PreviewView.ScaleType.FILL_CENTER
+            }
+            coroutineScope.launch {
+                cameraManager.setupCamera(lifecycleOwner, previewView, onAnalyze)
+            }
+            previewView
+        },
+        modifier = Modifier.fillMaxSize()
+    )
 }

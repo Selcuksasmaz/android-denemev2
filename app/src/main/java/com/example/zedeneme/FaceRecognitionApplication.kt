@@ -1,7 +1,7 @@
 package com.example.zedeneme
 
 import android.app.Application
-import com.example.zedeneme.database.FaceDatabase
+import com.example.zedeneme.data.FaceDatabase
 import com.example.zedeneme.repository.FaceRepository
 import com.example.zedeneme.engine.TensorFlowFaceRecognition
 

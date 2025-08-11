@@ -15,7 +15,8 @@ import com.example.zedeneme.engine.FeatureExtractionEngine
 import com.example.zedeneme.engine.TensorFlowFaceRecognition
 import com.example.zedeneme.data.DetectedFace
 import com.example.zedeneme.data.FaceProfile
-import com.example.zedeneme.data.StoredFaceFeatures
+import com.example.zedeneme.data.FaceFeatures
+import com.example.zedeneme.data.FaceAngle
 
 data class RegistrationState(
     val isLoading: Boolean = false,
@@ -112,14 +113,14 @@ class FaceRegistrationViewModel(
                 }
 
                 // Determine face angle
-                val faceAngle = determineFaceAngle(detectedFace)
+                val faceAngle = detectedFace.angle
                 Log.d(TAG, "📐 Face angle determined: $faceAngle")
 
                 // Add to captured faces
                 val currentFaces = _state.value.capturedFaces.toMutableList()
 
                 // Check if we already have this angle
-                val angleCount = currentFaces.count { it.angle == faceAngle }
+                val angleCount = currentFaces.count { it.angle.getAngleType() == faceAngle.getAngleType() }
                 if (angleCount >= 3) {
                     _state.value = _state.value.copy(
                         isLoading = false,
@@ -138,7 +139,7 @@ class FaceRegistrationViewModel(
                 currentFaces.add(faceWithFeatures)
 
                 // Update completed angles
-                val completedAngles = currentFaces.map { it.angle }.toSet()
+                val completedAngles = currentFaces.map { it.angle.getAngleType() }.toSet()
                 val progress = currentFaces.size.toFloat() / MIN_FACES_PER_PERSON
                 val isComplete = currentFaces.size >= MIN_FACES_PER_PERSON &&
                         completedAngles.size >= 3
@@ -196,32 +197,34 @@ class FaceRegistrationViewModel(
                     featureExtractionProgress = "💾 Profil kaydediliyor..."
                 )
 
-                // Create face profile
+                val profileId = java.util.UUID.randomUUID().toString()
                 val faceProfile = FaceProfile(
+                    id = profileId,
                     personName = currentState.currentPersonName,
-                    faceCount = currentState.capturedFaces.size,
-                    createdAt = System.currentTimeMillis(),
-                    updatedAt = System.currentTimeMillis(),
-                    featureType = currentState.currentFeatureType,
-                    averageConfidence = currentState.capturedFaces.map { it.confidence }.average().toFloat()
+                    frontalFeatures = currentState.capturedFaces.firstOrNull { it.angle.getAngleType() == "frontal" }?.extractedFeatures?.joinToString(",") ?: "",
+                    leftProfileFeatures = currentState.capturedFaces.firstOrNull { it.angle.getAngleType() == "left_profile" }?.extractedFeatures?.joinToString(",") ?: "",
+                    rightProfileFeatures = currentState.capturedFaces.firstOrNull { it.angle.getAngleType() == "right_profile" }?.extractedFeatures?.joinToString(",") ?: "",
+                    upAngleFeatures = currentState.capturedFaces.firstOrNull { it.angle.getAngleType() == "up_angle" }?.extractedFeatures?.joinToString(",") ?: "",
+                    downAngleFeatures = currentState.capturedFaces.firstOrNull { it.angle.getAngleType() == "down_angle" }?.extractedFeatures?.joinToString(",") ?: "",
+                    registrationDate = System.currentTimeMillis(),
+                    isComplete = currentState.isRegistrationComplete
                 )
 
-                val profileId = repository.insertProfile(faceProfile)
-                Log.d(TAG, "✅ Profile created with ID: $profileId")
+                repository.insertFullProfile(faceProfile)
+                Log.d(TAG, "✅ Full profile saved with ID: ${faceProfile.id}")
 
-                // Save individual face features
                 var savedCount = 0
                 for (face in currentState.capturedFaces) {
-                    val storedFeatures = StoredFaceFeatures(
-                        profileId = profileId,
-                        features = face.extractedFeatures ?: floatArrayOf(),
-                        angle = face.angle,
+                    val storedFeatures = FaceFeatures(
+                        profileId = faceProfile.id,
+                        features = face.extractedFeatures?.joinToString(",") ?: "",
+                        angle = face.angle.getAngleType(),
+                        landmarks = "", // Placeholder, you might want to serialize landmarks here
                         confidence = face.confidence,
-                        createdAt = System.currentTimeMillis(),
-                        featureType = currentState.currentFeatureType
+                        timestamp = System.currentTimeMillis()
                     )
 
-                    repository.insertFeatures(storedFeatures)
+                    repository.saveFeatures(faceProfile.id, face.angle.getAngleType(), face.extractedFeatures ?: floatArrayOf(), storedFeatures.landmarks)
                     savedCount++
 
                     _state.value = currentState.copy(
@@ -282,39 +285,7 @@ class FaceRegistrationViewModel(
         }
     }
 
-    private fun determineFaceAngle(detectedFace: DetectedFace): String {
-        return try {
-            val landmarks = detectedFace.landmarks
-            if (landmarks.points.size < 2) return "frontal"
-
-            val boundingBox = landmarks.boundingBox
-            val centerX = boundingBox.centerX()
-            val centerY = boundingBox.centerY()
-
-            // Sol ve sağ göz pozisyonları (index 0 ve 1)
-            val leftEye = landmarks.points[0]
-            val rightEye = landmarks.points[1]
-
-            // Yatay açı hesaplama
-            val eyeCenterX = (leftEye.first + rightEye.first) / 2
-            val horizontalOffset = (eyeCenterX - centerX) / boundingBox.width()
-
-            // Dikey açı hesaplama
-            val eyeCenterY = (leftEye.second + rightEye.second) / 2
-            val verticalOffset = (eyeCenterY - centerY) / boundingBox.height()
-
-            when {
-                horizontalOffset > 0.15f -> "right"
-                horizontalOffset < -0.15f -> "left"
-                verticalOffset < -0.1f -> "up"
-                verticalOffset > 0.1f -> "down"
-                else -> "frontal"
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Face angle determination error", e)
-            "frontal"
-        }
-    }
+    
 
     override fun onCleared() {
         super.onCleared()

@@ -1,56 +1,27 @@
-package com.example.zedeneme
+package com.example.zedeneme.engine
 
-import android.app.Application
-import com.example.zedeneme.data.FaceDatabase
-import com.example.zedeneme.engine.TensorFlowFaceRecognition
+import android.content.Context
+import com.example.zedeneme.data.RecognitionResult
 import com.example.zedeneme.repository.FaceRepository
+import com.example.zedeneme.engine.TensorFlowFaceRecognition
+import android.graphics.Bitmap
 
-class FaceRecognitionApplication : Application() {
+class FaceRecognitionEngine(
+    private val context: Context,
+    private val repository: FaceRepository,
+    private val tensorFlowFaceRecognition: TensorFlowFaceRecognition
+) {
 
-    // Repository
-    lateinit var repository: FaceRepository
-        private set
-
-    // TensorFlow Engine
-    lateinit var tensorFlowEngine: TensorFlowFaceRecognition
-        private set
-
-    companion object {
-        lateinit var instance: FaceRecognitionApplication
-            private set
+    fun recognizeFace(detectedFace: com.example.zedeneme.data.DetectedFace): RecognitionResult {
+        // Placeholder for face recognition logic
+        // This will involve using tensorFlowFaceRecognition to get embeddings
+        // and then comparing them with features from the repository.
+        return RecognitionResult("unknown_id", "Unknown", 0.0f, "frontal", System.currentTimeMillis())
     }
 
-    override fun onCreate() {
-        super.onCreate()
-        instance = this
-
-        // Database ve Repository kurulumu
-        val database = FaceDatabase.getDatabase(this)
-        repository = FaceRepository(database.faceDao())
-
-        // TensorFlow Lite Engine kurulumu
-        tensorFlowEngine = TensorFlowFaceRecognition(this)
-
-        android.util.Log.d("FaceRecognitionApp", "✅ Application başlatıldı - TensorFlow Lite hazır")
+    fun getRecognitionStats(): Map<String, Any> {
+        return mapOf("status" to "No stats available.")
     }
 
-    override fun onTerminate() {
-        super.onTerminate()
-
-        // TensorFlow Engine'i temizle
-        if (::tensorFlowEngine.isInitialized) {
-            tensorFlowEngine.release()
-            android.util.Log.d("FaceRecognitionApp", "🔒 TensorFlow Lite engine kapatıldı")
-        }
-    }
-
-    override fun onLowMemory() {
-        super.onLowMemory()
-        android.util.Log.w("FaceRecognitionApp", "⚠️ Düşük bellek uyarısı")
-    }
-
-    override fun onTrimMemory(level: Int) {
-        super.onTrimMemory(level)
-        android.util.Log.d("FaceRecognitionApp", "🧹 Bellek temizleme seviyesi: $level")
-    }
+    // Other methods as needed based on further errors
 }
