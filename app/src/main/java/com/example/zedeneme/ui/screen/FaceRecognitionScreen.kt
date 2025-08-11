@@ -1,4 +1,4 @@
-package ui.screen
+package com.example.zedeneme.ui.screen
 
 import android.Manifest
 import android.graphics.Bitmap

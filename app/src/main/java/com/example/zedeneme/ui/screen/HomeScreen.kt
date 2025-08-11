@@ -1,4 +1,4 @@
-package ui.screen
+package com.example.zedeneme.ui.screen
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn

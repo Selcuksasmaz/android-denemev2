@@ -21,4 +21,7 @@
     <string name="registration_complete">Kayıt tamamlandı</string>
     <string name="person_recognized">%s tanındı (%%%.1f)</string>
     <string name="person_not_recognized">Kişi tanınmadı</string>
+    <string name="camera_starting">Kamera başlatılıyor...</string>
+    <string name="camera_permission_needed_description">Yüz kaydetmek için kamera erişimi gereklidir</string>
+    <string name="grant_camera_permission">Kamera İzni Ver</string>
 </resources>

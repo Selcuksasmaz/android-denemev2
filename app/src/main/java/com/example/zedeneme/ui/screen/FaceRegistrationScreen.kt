@@ -1,5 +1,6 @@
-package ui.screen
+package com.example.zedeneme.ui.screen
 
+import android.Manifest
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -10,25 +11,39 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.zedeneme.FaceRecognitionApplication
+import com.example.zedeneme.R
+import com.example.zedeneme.camera.CameraManager
 import com.example.zedeneme.engine.FaceDetectionEngine
 import com.example.zedeneme.engine.FeatureExtractionEngine
+import com.example.zedeneme.ui.components.CameraPreview
 import com.example.zedeneme.viewmodel.FaceRegistrationViewModel
 import com.example.zedeneme.viewmodel.FaceRegistrationViewModelFactory
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.PermissionStatus
+import com.google.accompanist.permissions.rememberPermissionState
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
 @Composable
 fun FaceRegistrationScreen(
     onNavigateBack: () -> Unit = {}
 ) {
+    val context = LocalContext.current
+    
+    // Camera permission state
+    val cameraPermissionState = rememberPermissionState(Manifest.permission.CAMERA)
+    
     // Dependencies injection with TensorFlow support
     val repository = FaceRecognitionApplication.instance.repository
     val tensorFlowEngine = FaceRecognitionApplication.instance.tensorFlowEngine
     val faceDetectionEngine = remember { FaceDetectionEngine() }
     val featureExtractionEngine = remember { FeatureExtractionEngine(tensorFlowEngine) }
+    val cameraManager = remember { CameraManager(context) }
 
     val viewModel: FaceRegistrationViewModel = viewModel(
         factory = FaceRegistrationViewModelFactory(
@@ -40,6 +55,10 @@ fun FaceRegistrationScreen(
     )
 
     val state by viewModel.state.collectAsState()
+    
+    // Frame processing throttling
+    var lastFrameTime by remember { mutableLongStateOf(0L) }
+    val frameThrottleMs = 350L // Process every 350ms
 
     Column(
         modifier = Modifier
@@ -108,7 +127,7 @@ fun FaceRegistrationScreen(
                 Spacer(modifier = Modifier.height(8.dp))
 
                 LinearProgressIndicator(
-                    progress = state.registrationProgress,
+                    progress = { state.registrationProgress },
                     modifier = Modifier.fillMaxWidth(),
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -198,44 +217,79 @@ fun FaceRegistrationScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Camera placeholder and controls
+        // Camera preview or permission request
         Card(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(300.dp)
         ) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                if (state.isLoading) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        CircularProgressIndicator()
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("İşleniyor...")
+            when (cameraPermissionState.status) {
+                is PermissionStatus.Granted -> {
+                    if (state.isLoading) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                CircularProgressIndicator()
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("İşleniyor...")
+                            }
+                        }
+                    } else {
+                        CameraPreview(
+                            cameraManager = cameraManager,
+                            isActive = !state.isLoading,
+                            onFrame = { bitmap ->
+                                val currentTime = System.currentTimeMillis()
+                                if (currentTime - lastFrameTime > frameThrottleMs && !state.isLoading) {
+                                    lastFrameTime = currentTime
+                                    viewModel.processCameraFrame(bitmap)
+                                }
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
                     }
-                } else {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
+                }
+                
+                is PermissionStatus.Denied -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.CameraAlt,
-                            contentDescription = "Camera",
-                            modifier = Modifier.size(64.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Kamera görünümü burada olacak",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Text(
-                            text = "Yüzünüzü farklı açılardan kaydedin",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(16.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CameraAlt,
+                                contentDescription = "Camera",
+                                modifier = Modifier.size(64.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = stringResource(R.string.camera_permission_required),
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = stringResource(R.string.camera_permission_needed_description),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Button(
+                                onClick = { cameraPermissionState.launchPermissionRequest() }
+                            ) {
+                                Icon(Icons.Default.CameraAlt, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(stringResource(R.string.grant_camera_permission))
+                            }
+                        }
                     }
                 }
             }
