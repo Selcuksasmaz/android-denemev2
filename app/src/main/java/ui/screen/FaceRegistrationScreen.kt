@@ -1,5 +1,8 @@
 package ui.screen
 
+import android.Manifest
+import android.graphics.Bitmap
+import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -10,20 +13,29 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.zedeneme.FaceRecognitionApplication
+import com.example.zedeneme.camera.CameraManager
 import com.example.zedeneme.engine.FaceDetectionEngine
 import com.example.zedeneme.engine.FeatureExtractionEngine
 import com.example.zedeneme.viewmodel.FaceRegistrationViewModel
 import com.example.zedeneme.viewmodel.FaceRegistrationViewModelFactory
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.isGranted
+import com.google.accompanist.permissions.rememberPermissionState
+import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
 @Composable
 fun FaceRegistrationScreen(
     onNavigateBack: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     // Dependencies injection with TensorFlow support
     val repository = FaceRecognitionApplication.instance.repository
     val tensorFlowEngine = FaceRecognitionApplication.instance.tensorFlowEngine
@@ -40,6 +52,14 @@ fun FaceRegistrationScreen(
     )
 
     val state by viewModel.state.collectAsState()
+    val cameraManager = remember { CameraManager(context) }
+    val cameraPermissionState = rememberPermissionState(Manifest.permission.CAMERA)
+
+    LaunchedEffect(Unit) {
+        if (!cameraPermissionState.status.isGranted) {
+            cameraPermissionState.launchPermissionRequest()
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -159,7 +179,7 @@ fun FaceRegistrationScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
-                    val angles = listOf("frontal", "left", "right", "up", "down")
+                    val angles = listOf("frontal", "left_profile", "right_profile", "up_angle", "down_angle")
 
                     angles.forEach { angle ->
                         val isCompleted = state.completedAngles.contains(angle)
@@ -171,10 +191,10 @@ fun FaceRegistrationScreen(
                             Icon(
                                 imageVector = when (angle) {
                                     "frontal" -> Icons.Default.Face
-                                    "left" -> Icons.Default.TurnLeft
-                                    "right" -> Icons.Default.TurnRight
-                                    "up" -> Icons.Default.KeyboardArrowUp
-                                    "down" -> Icons.Default.KeyboardArrowDown
+                                    "left_profile" -> Icons.Default.TurnLeft
+                                    "right_profile" -> Icons.Default.TurnRight
+                                    "up_angle" -> Icons.Default.KeyboardArrowUp
+                                    "down_angle" -> Icons.Default.KeyboardArrowDown
                                     else -> Icons.Default.Face
                                 },
                                 contentDescription = angle,
@@ -182,7 +202,14 @@ fun FaceRegistrationScreen(
                                 modifier = Modifier.size(24.dp)
                             )
                             Text(
-                                text = angle.take(3),
+                                text = when (angle) {
+                                    "frontal" -> "fro"
+                                    "left_profile" -> "lef"
+                                    "right_profile" -> "rig"
+                                    "up_angle" -> "up"
+                                    "down_angle" -> "dow"
+                                    else -> angle.take(3)
+                                },
                                 style = MaterialTheme.typography.bodySmall
                             )
                             Text(
@@ -198,44 +225,39 @@ fun FaceRegistrationScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Camera placeholder and controls
+        // Camera preview and controls
         Card(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(300.dp)
         ) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                if (state.isLoading) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        CircularProgressIndicator()
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("İşleniyor...")
+            if (cameraPermissionState.status.isGranted) {
+                CameraPreview(
+                    cameraManager = cameraManager,
+                    onAnalyze = { bitmap ->
+                        viewModel.processCameraFrame(bitmap)
                     }
-                } else {
+                )
+            } else {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Icon(
                             imageVector = Icons.Default.CameraAlt,
-                            contentDescription = "Camera",
+                            contentDescription = "Camera Permission",
                             modifier = Modifier.size(64.dp),
                             tint = MaterialTheme.colorScheme.primary
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Kamera görünümü burada olacak",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                        Text(
-                            text = "Yüzünüzü farklı açılardan kaydedin",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Text("Kamera izni yüz kayıt için gereklidir.")
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(onClick = { cameraPermissionState.launchPermissionRequest() }) {
+                            Text("İzin İste")
+                        }
                     }
                 }
             }
@@ -349,10 +371,10 @@ fun FaceRegistrationScreen(
                             Icon(
                                 imageVector = when (face.angle.getAngleType()) {
                                     "frontal" -> Icons.Default.Face
-                                    "left" -> Icons.Default.TurnLeft
-                                    "right" -> Icons.Default.TurnRight
-                                    "up" -> Icons.Default.KeyboardArrowUp
-                                    "down" -> Icons.Default.KeyboardArrowDown
+                                    "left_profile" -> Icons.Default.TurnLeft
+                                    "right_profile" -> Icons.Default.TurnRight
+                                    "up_angle" -> Icons.Default.KeyboardArrowUp
+                                    "down_angle" -> Icons.Default.KeyboardArrowDown
                                     else -> Icons.Default.Face
                                 },
                                 contentDescription = face.angle.getAngleType(),
@@ -394,4 +416,32 @@ fun FaceRegistrationScreen(
             viewModel.clearMessages()
         }
     }
+}
+
+@Composable
+fun CameraPreview(
+    cameraManager: CameraManager,
+    onAnalyze: (Bitmap) -> Unit
+) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val coroutineScope = rememberCoroutineScope()
+
+    DisposableEffect(Unit) {
+        onDispose {
+            cameraManager.release()
+        }
+    }
+
+    AndroidView(
+        factory = { context ->
+            val previewView = PreviewView(context).apply {
+                this.scaleType = PreviewView.ScaleType.FILL_CENTER
+            }
+            coroutineScope.launch {
+                cameraManager.setupCamera(lifecycleOwner, previewView, onAnalyze)
+            }
+            previewView
+        },
+        modifier = Modifier.fillMaxSize()
+    )
 }
